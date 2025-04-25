@@ -1,6 +1,5 @@
-# marketplace.py
-
 import uuid
+import random
 from collections import deque, defaultdict
 
 # In-memory storage
@@ -9,14 +8,19 @@ buy_orders = deque()
 matches = []
 product_stock = defaultdict(int)
 
-# Base prices per product (₦ per unit)
+wallets = {"Farmer": 0, "Buyer": 100000}  # Buyer starts with ₦100,000
+inventories = {"Farmer": {crop: random.randint(148, 364) for crop in ["maize", "tomato", "cocoa"]}}
+
+# Track orders and their status for GUI
+active_orders = {}
+
+# Base prices per product (₦ per kg)
 base_prices = {
     "maize": 250,
     "tomato": 300,
     "cocoa": 800
 }
 
-# Order classes
 class Order:
     def __init__(self, user_type, product, quantity):
         self.id = str(uuid.uuid4())
@@ -34,40 +38,57 @@ class Match:
         self.quantity = quantity
         self.price = price
 
-# Calculate dynamic market price based on stock
-# More stock = lower price, less stock = higher price
-# Cap the price change at ±30% from base
+# Market price logic
 def get_market_price(product):
-    stock = product_stock[product]
-    base = base_prices[product]
-    multiplier = max(0.7, min(1.3, 1.3 - 0.01 * stock))
-    return round(base * multiplier, 2)
+    relevant_orders = [order for order in sell_orders if order.product == product]
+    if relevant_orders:
+        prices = [order.price for order in relevant_orders]
+        return round(sum(prices) / len(prices), 2)
+    else:
+        return base_prices[product]
 
-# Order matching engine
+
 def match_orders():
     global sell_orders, buy_orders, matches
 
     new_buy_orders = deque()
     while buy_orders:
         buy = buy_orders.popleft()
-        matched = False
         new_sell_orders = deque()
 
         while sell_orders:
             sell = sell_orders.popleft()
             if buy.product == sell.product:
                 quantity = min(buy.remaining, sell.remaining)
+
+                total_cost = quantity * sell.price
+                if wallets["Buyer"] < total_cost:
+                    new_sell_orders.appendleft(sell)
+                    break
+
+                if inventories["Farmer"][sell.product] < quantity:
+                    continue
+
                 match = Match(buy, sell, quantity, sell.price)
                 matches.append(match)
 
                 buy.remaining -= quantity
                 sell.remaining -= quantity
                 product_stock[sell.product] -= quantity
+                inventories["Farmer"][sell.product] -= quantity
+
+                wallets["Buyer"] -= total_cost
+                wallets["Farmer"] += total_cost
+
+                # Update active order trackers
+                for order in (buy, sell):
+                    if order.id in active_orders:
+                        active_orders[order.id]['filled'] += quantity
+                        active_orders[order.id]['callback'](active_orders[order.id]['filled'])
 
                 if sell.remaining > 0:
                     new_sell_orders.appendleft(sell)
                 if buy.remaining == 0:
-                    matched = True
                     break
             else:
                 new_sell_orders.append(sell)
@@ -78,14 +99,26 @@ def match_orders():
 
     buy_orders = new_buy_orders
 
-# Submission functions
-def submit_order(user_type, product, quantity):
+def submit_order(user_type, product, quantity, on_update_callback=None):
+    quantity = int(quantity)
+    if user_type == 'Farmer':
+        if inventories["Farmer"][product] < quantity:
+            raise Exception("Not enough inventory to sell")
+
     order = Order(user_type, product, quantity)
     if user_type == 'Farmer':
         sell_orders.append(order)
-        product_stock[product] += order.quantity
+        product_stock[product] += quantity
     else:
         buy_orders.append(order)
+
+    if on_update_callback:
+        active_orders[order.id] = {
+            'filled': order.quantity - order.remaining,
+            'total': order.quantity,
+            'callback': on_update_callback
+        }
+
     match_orders()
     return order
 
@@ -97,3 +130,9 @@ def get_current_price(product):
 
 def get_product_list():
     return list(base_prices.keys())
+
+def get_wallet(user_type):
+    return wallets[user_type]
+
+def get_inventory():
+    return inventories["Farmer"]
