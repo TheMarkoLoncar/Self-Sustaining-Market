@@ -8,13 +8,16 @@ buy_orders = deque()
 matches = []
 product_stock = defaultdict(int)
 
-wallets = {"Farmer": 0, "Buyer": 100000}  # Buyer starts with ₦100,000
-inventories = {"Farmer": {crop: random.randint(148, 364) for crop in ["maize", "tomato", "cocoa"]}}
+wallets = {
+    "Farmer": 0,
+    "Buyer": random.randint(128345, 348723)  # Random starting wallet for buyer
+}
+inventories = {
+    "Farmer": {crop: random.randint(148, 364) for crop in ["maize", "tomato", "cocoa"]}
+}
 
-# Track orders and their status for GUI
 active_orders = {}
 
-# Base prices per product (₦ per kg)
 base_prices = {
     "maize": 250,
     "tomato": 300,
@@ -38,7 +41,6 @@ class Match:
         self.quantity = quantity
         self.price = price
 
-# Market price logic
 def get_market_price(product):
     relevant_orders = [order for order in sell_orders if order.product == product]
     if relevant_orders:
@@ -46,7 +48,6 @@ def get_market_price(product):
         return round(sum(prices) / len(prices), 2)
     else:
         return base_prices[product]
-
 
 def match_orders():
     global sell_orders, buy_orders, matches
@@ -101,11 +102,18 @@ def match_orders():
 
 def submit_order(user_type, product, quantity, on_update_callback=None):
     quantity = int(quantity)
+
     if user_type == 'Farmer':
         if inventories["Farmer"][product] < quantity:
             raise Exception("Not enough inventory to sell")
 
+    if user_type == 'Buyer':
+        estimated_cost = get_market_price(product) * quantity
+        if wallets["Buyer"] < estimated_cost:
+            raise Exception("Insufficient funds for this order")
+
     order = Order(user_type, product, quantity)
+
     if user_type == 'Farmer':
         sell_orders.append(order)
         product_stock[product] += quantity
@@ -116,7 +124,15 @@ def submit_order(user_type, product, quantity, on_update_callback=None):
         active_orders[order.id] = {
             'filled': order.quantity - order.remaining,
             'total': order.quantity,
-            'callback': on_update_callback
+            'callback': lambda filled: (
+                on_update_callback(filled),
+                active_orders.update({
+                    order.id: {
+                        **active_orders[order.id],
+                        'filled': filled
+                    }
+                })
+            )
         }
 
     match_orders()

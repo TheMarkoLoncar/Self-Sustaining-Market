@@ -1,11 +1,56 @@
 import tkinter as tk
-from tkinter import ttk
-from marketplace import (
-    submit_order, get_matches, get_current_price,
-    get_product_list, get_wallet, get_inventory
-)
+from tkinter import ttk, messagebox
+import marketplace
+
+root = tk.Tk()
+root.title("Crop Marketplace")
+root.geometry("800x600")
 
 order_windows = []
+
+# === UI Components ===
+
+# Wallet and Inventory Display
+wallet_label = tk.Label(root, text="", font=("Arial", 12))
+wallet_label.pack(pady=10)
+
+inventory_label = tk.Label(root, text="", font=("Arial", 12))
+inventory_label.pack(pady=5)
+
+# Crop Price Frame
+price_frame = tk.Frame(root)
+price_frame.pack(pady=10)
+price_labels = {}
+
+# Tabs
+tab_control = ttk.Notebook(root)
+farmer_tab = ttk.Frame(tab_control)
+buyer_tab = ttk.Frame(tab_control)
+tab_control.add(farmer_tab, text="Farmer")
+tab_control.add(buyer_tab, text="Buyer")
+tab_control.pack(expand=1, fill="both")
+
+# Match Display
+match_list = tk.Listbox(root, height=10, width=80)
+match_list.pack(pady=10)
+
+# === Functions ===
+
+def refresh_wallet_inventory():
+    wallet_label.config(text=f"Farmer Wallet: ₦{marketplace.get_wallet('Farmer'):,} | Buyer Wallet: ₦{marketplace.get_wallet('Buyer'):,}")
+    inv = marketplace.get_inventory()
+    inventory_label.config(text="Farmer Inventory: " + ", ".join([f"{k}: {v}kg" for k, v in inv.items()]))
+
+def refresh_prices():
+    for product in marketplace.get_product_list():
+        price = marketplace.get_current_price(product)
+        if product in price_labels:
+            price_labels[product].config(text=f"{product.capitalize()}: ₦{price:.2f}")
+
+def refresh_matches():
+    match_list.delete(0, tk.END)
+    for match in marketplace.get_matches():
+        match_list.insert(tk.END, match)
 
 def create_order_window(order_type, product, quantity, price):
     win = tk.Toplevel()
@@ -31,90 +76,65 @@ def create_order_window(order_type, product, quantity, price):
         else:
             var_text.set(f"{quantity}kg of {product.upper()} at ₦{price:.2f}/kg, {current_fill}/{quantity}kg filled")
 
+        refresh_wallet_inventory()
+
     order_windows.append(win)
     return update_progress
 
-def create_window(user_type):
-    window = tk.Tk()
-    window.title(user_type)
+def submit_order(user_type, product_entry, quantity_entry):
+    try:
+        product = product_entry.get()
+        quantity = int(quantity_entry.get())
+        update_cb = create_order_window(user_type, product, quantity, marketplace.get_current_price(product))
+        marketplace.submit_order(user_type, product, quantity, update_cb)
+        refresh_prices()
+        refresh_matches()
+        refresh_wallet_inventory()
+    except Exception as e:
+        messagebox.showerror("Error", str(e))
 
-    tk.Label(window, text=f"{user_type} Interface", font=("Arial", 16)).pack(pady=10)
+# === Farmer Tab ===
 
-    wallet_var = tk.StringVar()
-    inventory_text = tk.StringVar()
+tk.Label(farmer_tab, text="Select Crop:").pack(pady=5)
+farmer_product_entry = ttk.Combobox(farmer_tab, values=marketplace.get_product_list())
+farmer_product_entry.pack(pady=5)
+farmer_product_entry.set(marketplace.get_product_list()[0])
 
-    def refresh_wallet_inventory():
-        wallet_var.set(f"Wallet: ₦{get_wallet(user_type):,.2f}")
-        if user_type == "Farmer":
-            inventory = get_inventory()
-            inventory_text.set("Inventory: " + ", ".join(f"{k}: {v}kg" for k, v in inventory.items()))
+tk.Label(farmer_tab, text="Quantity to Sell (kg):").pack(pady=5)
+farmer_quantity_entry = tk.Entry(farmer_tab)
+farmer_quantity_entry.pack(pady=5)
 
-    tk.Label(window, textvariable=wallet_var).pack()
-    if user_type == "Farmer":
-        tk.Label(window, textvariable=inventory_text).pack()
-    refresh_wallet_inventory()
+tk.Button(farmer_tab, text="Submit Sell Order",
+          command=lambda: submit_order("Farmer", farmer_product_entry, farmer_quantity_entry)).pack(pady=10)
 
-    tk.Label(window, text="Product:").pack()
-    product_var = tk.StringVar(window)
-    product_var.set(get_product_list()[0])
-    product_dropdown = ttk.Combobox(window, textvariable=product_var, values=get_product_list(), state="readonly")
-    product_dropdown.pack()
+# === Buyer Tab ===
 
-    tk.Label(window, text="Quantity:").pack()
-    quantity_entry = tk.Entry(window)
-    quantity_entry.pack()
+tk.Label(buyer_tab, text="Select Crop:").pack(pady=5)
+buyer_product_entry = ttk.Combobox(buyer_tab, values=marketplace.get_product_list())
+buyer_product_entry.pack(pady=5)
+buyer_product_entry.set(marketplace.get_product_list()[0])
 
-    price_label = tk.Label(window, text="Price per unit (₦):")
-    price_label.pack()
-    price_value = tk.Label(window, text="")
-    price_value.pack()
+tk.Label(buyer_tab, text="Quantity to Buy (kg):").pack(pady=5)
+buyer_quantity_entry = tk.Entry(buyer_tab)
+buyer_quantity_entry.pack(pady=5)
 
-    result_label = tk.Label(window, text="", fg="green")
-    result_label.pack(pady=5)
+tk.Button(buyer_tab, text="Submit Buy Order",
+          command=lambda: submit_order("Buyer", buyer_product_entry, buyer_quantity_entry)).pack(pady=10)
 
-    match_box = tk.Listbox(window, width=50)
-    match_box.pack(pady=10)
+# === Crop Prices Display ===
 
-    def update_price_display(*args):
-        product = product_var.get()
-        price = get_current_price(product)
-        price_value.config(text=f"₦{price:.2f}")
+tk.Label(price_frame, text="Current Crop Prices:", font=("Arial", 12, "bold")).pack()
+for crop in marketplace.get_product_list():
+    lbl = tk.Label(price_frame, text="", font=("Arial", 11))
+    lbl.pack()
+    price_labels[crop] = lbl
 
-    def submit():
-        product = product_var.get()
-        quantity = quantity_entry.get()
-        if not product or not quantity:
-            result_label.config(text="Fill in all fields", fg="red")
-            return
-        try:
-            price = get_current_price(product)
-            updater = create_order_window(user_type, product, int(quantity), price)
-            order = submit_order(user_type, product, quantity, updater)
-            result_label.config(text=f"{order.quantity} {order.product} order placed at ₦{order.price:.2f}", fg="green")
-            update_matches()
-            refresh_wallet_inventory()
-            update_price_display()
-        except Exception as e:
-            result_label.config(text=str(e), fg="red")
+# === Initial Refresh ===
 
-    def update_matches():
-        match_box.delete(0, tk.END)
-        for m in get_matches():
-            match_box.insert(tk.END, m)
+refresh_wallet_inventory()
+refresh_prices()
+refresh_matches()
 
-    product_var.trace("w", update_price_display)
-    update_price_display()
+# === Run ===
 
-    tk.Button(window, text="Submit Order", command=submit).pack(pady=5)
-    tk.Button(window, text="Refresh Matches", command=update_matches).pack(pady=5)
-
-    return window
-
-if __name__ == "__main__":
-    farmer_window = create_window("Farmer")
-    buyer_window = create_window("Buyer")
-
-    farmer_window.geometry("+100+100")
-    buyer_window.geometry("+700+100")
-
-    farmer_window.mainloop()
+root.mainloop()
